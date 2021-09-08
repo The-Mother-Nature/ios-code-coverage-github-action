@@ -1,0 +1,111 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build_test:
+    runs-on: macos-latest
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        scheme: ['My (iOS)']
+        destination: ['platform=iOS Simulator,OS=14.4,name=iPhone 12']
+
+    steps:
+      - name: Build
+        env:
+          scheme: ${{ matrix.scheme }}
+          destination: ${{ matrix.destination }}
+        run: >
+          xcodebuild
+              clean
+              build-for-testing
+              -clonedSourcePackagesDirPath SourcePackages
+              -scheme "${scheme}"
+              -destination "${destination}"
+              CODE_SIGN_IDENTITY=""
+              CODE_SIGNING_REQUIRED=NO
+              COMPILER_INDEX_STORE_ENABLE=NO
+              -derivedDataPath Build/
+              -workspace My.xcworkspace
+
+      - name: Test
+        env:
+          scheme: ${{ matrix.scheme }}
+          destination: ${{ matrix.destination }}
+        run: >-
+          xcodebuild
+              test-without-building
+              -clonedSourcePackagesDirPath SourcePackages
+              -quiet
+              -scheme "${scheme}"
+              -destination "${destination}"
+              CODE_SIGN_IDENTITY=""
+              CODE_SIGNING_REQUIRED=NO
+              COMPILER_INDEX_STORE_ENABLE=NO
+              -enableCodeCoverage YES
+              -derivedDataPath Build/
+              -workspace My.xcworkspace
+              -testPlan TestPlan
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: coverage-report
+          path: ./Build/Logs/Test/*
+
+  coverage:
+    name: Coverage Report
+    runs-on: macos-latest
+    needs: build_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: |
+          cd .github/scripts
+          npm install --quiet
+
+      - name: Download current coverage report
+        uses: actions/download-artifact@v2
+        with:
+          name: coverage-report
+          path: coverage/current
+
+      - name: Download baseline coverage report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          .github/scripts/node_modules/.bin/zx .github/scripts/download-gh-artifact.mjs \
+            --owner OWNER \
+            --repo REPO \
+            --token $GITHUB_TOKEN \
+            --branch main \
+            --workflow ci \
+            --artifact coverage-report \
+            --destination $GITHUB_WORKSPACE/coverage/baseline
+
+      - name: Compare Coverage
+        id: coverage-report
+        shell: bash
+        run: |
+          OUTPUT=$( .github/scripts/node_modules/.bin/zx .github/scripts/coverage.mjs --baseline $GITHUB_WORKSPACE/coverage/baseline/*.xcresult --current $GITHUB_WORKSPACE/coverage/current/*.xcresult --config .coverage.json )
+          OUTPUT="${OUTPUT//'%'/%25}"
+          OUTPUT="${OUTPUT//$'\n'/%0A}"
+          OUTPUT="${OUTPUT//$'\r'/%0D}"
+          echo "::set-output name=result::$(echo $OUTPUT)"
+
+      - uses: jwalton/gh-find-current-pr@v1
+        id: finder
+
+      - uses: marocchino/sticky-pull-request-comment@v2
+        if: always()
+        with:
+          header: coverage-report
+          number: ${{ steps.finder.outputs.pr }}
+          message: |
+            ## Coverage Report
+
+            ${{ steps.coverage-report.outputs.result }}

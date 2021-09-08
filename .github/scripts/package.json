@@ -1,0 +1,12 @@
+{
+  "name": "ios-cert-fetch",
+  "version": "1.0.0",
+  "description": "",
+  "author": "Benjamin Gaertig",
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/core": "^3.5.1",
+    "markdown-table": "^3.0.1",
+    "zx": "^3.1.0"
+  }
+}
